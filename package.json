@@ -1,0 +1,13 @@
+{
+  "name": "note-auto-post",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "generate": "node generate-article.mjs",
+    "post": "node post-to-note.mjs"
+  },
+  "dependencies": {
+    "playwright": "^1.47.0"
+  }
+}
