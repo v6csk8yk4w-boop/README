@@ -1,0 +1,45 @@
+name: note自動投稿
+
+on:
+  schedule:
+    - cron: "0 21 * * *" # 毎日 日本時間6時(UTC 21時)に自動実行。好きな時間に変更可
+  workflow_dispatch: {} # これがあると「手動で今すぐ実行」ボタンが使える
+
+jobs:
+  post-to-note:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: 依存関係インストール
+        run: npm install
+
+      - name: Playwright(ブラウザ)をインストール
+        run: npx playwright install --with-deps chromium
+
+      - name: Claude APIで記事を生成
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          ARTICLE_AUDIENCE: "AIを使ってみたいけど何から始めるかわからない会社員"
+          ARTICLE_TONE: "親しみやすい"
+        run: node generate-article.mjs
+
+      - name: noteに下書き保存
+        env:
+          NOTE_EMAIL: ${{ secrets.NOTE_EMAIL }}
+          NOTE_PASSWORD: ${{ secrets.NOTE_PASSWORD }}
+        run: node post-to-note.mjs
+
+      - name: スクリーンショットを保存(うまくいったか確認用)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: note-post-screenshots
+          path: |
+            before-save.png
+            error-screenshot.png
+          if-no-files-found: ignore
