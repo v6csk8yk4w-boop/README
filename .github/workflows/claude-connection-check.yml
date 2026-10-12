@@ -1,0 +1,79 @@
+name: Claude connection check (manual)
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: claude-connection-check
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Verify one short Claude response
+        shell: python
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          import json
+          import os
+          import sys
+          import urllib.error
+          import urllib.request
+
+          if os.environ.get("GITHUB_RUN_ATTEMPT") != "1":
+              sys.exit("Stopped: reruns are disabled for this connection check.")
+          key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
+          if not key:
+              sys.exit("Stopped: ANTHROPIC_API_KEY is missing.")
+
+          class NoRedirect(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self, req, fp, code, msg, headers, newurl):
+                  return None
+
+          payload = {
+              "model": "claude-opus-5",
+              "max_tokens": 32,
+              "thinking": {"type": "disabled"},
+              "output_config": {"effort": "low"},
+              "messages": [{"role": "user", "content":
+                  "Reply with exactly this Japanese text and nothing else: 接続確認成功"}],
+          }
+          request = urllib.request.Request(
+              "https://api.anthropic.com/v1/messages",
+              data=json.dumps(payload).encode("utf-8"),
+              headers={"x-api-key": key, "anthropic-version": "2023-06-01",
+                       "Content-Type": "application/json"},
+              method="POST",
+          )
+          try:
+              with urllib.request.build_opener(NoRedirect()).open(request, timeout=30) as response:
+                  status = response.status
+                  result = json.load(response)
+          except urllib.error.HTTPError as error:
+              sys.exit("Claude check failed: HTTP " + str(error.code))
+          except Exception:
+              sys.exit("Claude check failed: network or response error; no retry was sent.")
+
+          text = "".join(part.get("text", "") for part in result.get("content", [])
+                         if part.get("type") == "text").strip()
+          if status != 200 or text != "接続確認成功" or result.get("stop_reason") != "end_turn":
+              sys.exit("Claude check failed: response did not match the expected short text.")
+          usage = result.get("usage", {})
+          input_tokens = int(usage.get("input_tokens", 0))
+          output_tokens = int(usage.get("output_tokens", 0))
+          estimated_usd = (input_tokens * 5 + output_tokens * 25) / 1_000_000
+          report = (
+              "PASS: Claude returned 接続確認成功\n"
+              "HTTP: 200\nModel: claude-opus-5\n"
+              f"Input tokens: {input_tokens}\nOutput tokens: {output_tokens}\n"
+              f"Estimated API usage: USD {estimated_usd:.6f}\n"
+              "Exactly one request. No note or publishing steps.\n"
+          )
+          print(report)
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:
+              summary.write(report)
